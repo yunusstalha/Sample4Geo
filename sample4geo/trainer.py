@@ -5,7 +5,7 @@ from .utils import AverageMeter
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
-def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None):
+def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None, wandb=None):
 
     # set model train mode
     model.train()
@@ -95,7 +95,8 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
         
         
         if train_config.verbose:
-            
+            if wandb:
+                wandb.log({"loss": loss.item(), "lr": optimizer.param_groups[0]['lr']})
             monitor = {"loss": "{:.4f}".format(loss.item()),
                        "loss_avg": "{:.4f}".format(losses.avg),
                        "lr" : "{:.6f}".format(optimizer.param_groups[0]['lr'])}
@@ -110,7 +111,7 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
     return losses.avg
 
 
-def predict(train_config, model, dataloader):
+def predict(train_config, model, dataloader, is_query=True):
     
     model.eval()
     
@@ -134,7 +135,10 @@ def predict(train_config, model, dataloader):
             with autocast():
          
                 img = img.to(train_config.device)
-                img_feature = model(img)
+                if is_query:
+                    img_feature = model(img)
+                else:
+                    img_feature = model(None, img)
             
                 # normalize is calculated in fp32
                 if train_config.normalize_features:

@@ -18,12 +18,12 @@ from sample4geo.evaluate.vigor import evaluate, calc_sim
 from sample4geo.loss import InfoNCE
 from sample4geo.model import TimmModel
 
-
+import wandb
 @dataclass
 class Configuration:
     
     # Model
-    model: str = 'convnext_base.fb_in22k_ft_in1k_384'
+    model: str = 'vit_base_patch16_clip_224.openai'  # nvidia/segformer-b3-finetuned-ade-512-512, convnext_base.fb_in22k_ft_in1k_384
     
     # Override model image size
     img_size: int = 384
@@ -32,22 +32,22 @@ class Configuration:
     mixed_precision: bool = True
     seed = 1
     epochs: int = 40
-    batch_size: int = 128        # keep in mind real_batch_size = 2 * batch_size
+    batch_size: int = 64        # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
-    gpu_ids: tuple = (0,1,2,3,4,5,6,7)   # GPU ids for training
+    gpu_ids: tuple = (0,1,2)   # GPU ids for training
     
     
     # Similarity Sampling
     custom_sampling: bool = True   # use custom sampling instead of random
     gps_sample: bool = True        # use gps sampling
-    sim_sample: bool = True        # use similarity sampling
-    neighbour_select: int = 64     # max selection size from pool
-    neighbour_range: int = 128     # pool size for selection
-    gps_dict_path: str = "./data/VIGOR/gps_dict_same.pkl"   # gps_dict_cross.pkl | gps_dict_same.pkl
+    sim_sample: bool = False        # use similarity sampling
+    neighbour_select: int = 32     # max selection size from pool
+    neighbour_range: int = 64     # pool size for selection
+    gps_dict_path: str = "/home/erzurumlu.1/yunus/research_drive/data/VIGOR/gps_dict_cross.pkl"   # gps_dict_cross.pkl | gps_dict_same.pkl
  
     # Eval
-    batch_size_eval: int = 128
-    eval_every_n_epoch: int = 4      # eval every n Epoch
+    batch_size_eval: int = 64
+    eval_every_n_epoch: int = 10      # eval every n Epoch
     normalize_features: bool = True
 
     # Optimizer 
@@ -59,14 +59,14 @@ class Configuration:
     label_smoothing: float = 0.1
     
     # Learning Rate
-    lr: float = 0.001                  # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
+    lr: float = 0.0001                  # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
     scheduler: str = "cosine"          # "polynomial" | "cosine" | "constant" | None
     warmup_epochs: int = 1
     lr_end: float = 0.0001             #  only for "polynomial"
     
     # Dataset
-    data_folder = "./data/VIGOR"
-    same_area: bool = True             # True: same | False: cross
+    data_folder = "/home/erzurumlu.1/yunus/research_drive/data/VIGOR"
+    same_area: bool = False             # True: same | False: cross
     ground_cutting = 0                 # cut ground upper and lower
    
     # Augment Images
@@ -74,7 +74,7 @@ class Configuration:
     prob_flip: float = 0.5             # flipping the sat image and ground images simultaneously
     
     # Savepath for model checkpoints
-    model_path: str = "./vigor_same"
+    model_path: str = "/home/erzurumlu.1/yunus/research_drive/vigor_cross"
     
     # Eval before training
     zero_shot: bool = False  
@@ -104,6 +104,15 @@ config = Configuration()
 
 if __name__ == '__main__':
 
+    wandb.init(project='Sample4Geo', 
+               config=config.__dict__,
+                notes="This run is for training Vigor model on cross area with GPS sampling only. Model is ConvNext with 384x384 sat 384x768 ground images. ")
+    if config.same_area:
+        task = "same"
+    else:
+        task = "cross"
+    wandb.run.name = f"{time.strftime('%Y%m%d_%H%M%S')}_{task}_batch{config.batch_size}_lr{config.lr}_img{config.img_size}_model_{config.model}"
+    wandb.config.update({"model_path": config.model_path})  # Optionally log more custom fields
 
     model_path = "{}/{}/{}".format(config.model_path,
                                        config.model,
@@ -133,8 +142,10 @@ if __name__ == '__main__':
                           
     data_config = model.get_config()
     print(data_config)
-    mean = data_config["mean"]
-    std = data_config["std"]
+    # mean = data_config["mean"]
+    # std = data_config["std"]
+    mean = (0.48145466, 0.4578275, 0.40821073)
+    std = (0.26862954, 0.26130258, 0.27577711)
     img_size = config.img_size
     
     image_size_sat = (img_size, img_size)
@@ -406,12 +417,18 @@ if __name__ == '__main__':
                            loss_function=loss_function,
                            optimizer=optimizer,
                            scheduler=scheduler,
-                           scaler=scaler)
-        
+                           scaler=scaler,
+                           wandb=wandb)
+        wandb.log({"epoch": epoch, "train_loss": train_loss, "learning_rate": optimizer.param_groups[0]['lr']})
+
         print("Epoch: {}, Train Loss = {:.3f}, Lr = {:.6f}".format(epoch,
                                                                    train_loss,
                                                                    optimizer.param_groups[0]['lr']))
-        
+        if (epoch % 5 == 0 and epoch != 0):
+            if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
+                torch.save(model.module.state_dict(), '{}/weights_e{}.pth'.format(model_path, epoch))
+            else:
+                torch.save(model.state_dict(), '{}/weights_e{}.pth'.format(model_path, epoch))
         # evaluate
         if (epoch % config.eval_every_n_epoch == 0 and epoch != 0) or epoch == config.epochs:
         
@@ -424,7 +441,8 @@ if __name__ == '__main__':
                                ranks=[1, 5, 10],
                                step_size=1000,
                                cleanup=True)
-            
+            wandb.log({"epoch": epoch, "r1_test": r1_test})
+
             if config.sim_sample:
                 r1_train, sim_dict = calc_sim(config=config,
                                               model=model,
@@ -433,14 +451,14 @@ if __name__ == '__main__':
                                               ranks=[1, 5, 10],
                                               step_size=1000,
                                               cleanup=True)
-            if r1_test > best_score:
+            # if r1_test > best_score:
 
-                best_score = r1_test
+            #     best_score = r1_test
 
-                if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
-                    torch.save(model.module.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
-                else:
-                    torch.save(model.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
+            #     if torch.cuda.device_count() > 1 and len(config.gpu_ids) > 1:
+            #         torch.save(model.module.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
+            #     else:
+            #         torch.save(model.state_dict(), '{}/weights_e{}_{:.4f}.pth'.format(model_path, epoch, r1_test))
                 
 
         if config.custom_sampling:
