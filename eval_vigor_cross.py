@@ -13,7 +13,7 @@ from sample4geo.model import TimmModel
 class Configuration:
     
     # Model
-    model: str = 'convnext_base.fb_in22k_ft_in1k_384'
+    model: str = 'vit_base_patch16_clip_224.openai'
     
     # Override model image size
     img_size: int = 384
@@ -21,16 +21,16 @@ class Configuration:
     # Evaluation 
     batch_size: int = 128
     verbose: bool = True
-    gpu_ids: tuple = (0,)
+    gpu_ids: tuple = (0,1,2)
     normalize_features: bool = True    
     
     # Dataset
-    data_folder = "./data/VIGOR"
+    data_folder = "/home/erzurumlu.1/yunus/research_drive/data/VIGOR"
     same_area: bool = False            # True: same | False: cross
     ground_cutting = 0                 # cut ground upper and lower
    
     # Checkpoint to start from
-    checkpoint_start = 'pretrained/vigor_cross/convnext_base.fb_in22k_ft_in1k_384/weights_e40_0.6109.pth' 
+    checkpoint_start = '/home/erzurumlu.1/yunus/research_drive/vigor_cross/vit_base_patch16_clip_224.openai/160356/weights_e10.pth' 
   
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
@@ -61,8 +61,10 @@ if __name__ == '__main__':
                           
     data_config = model.get_config()
     print(data_config)
-    mean = data_config["mean"]
-    std = data_config["std"]
+    # mean = data_config["mean"]
+    # std = data_config["std"]
+    mean = (0.48145466, 0.4578275, 0.40821073)
+    std = (0.26862954, 0.26130258, 0.27577711)
     img_size = config.img_size
     
     image_size_sat = (img_size, img_size)
@@ -115,7 +117,7 @@ if __name__ == '__main__':
                                            batch_size=config.batch_size,
                                            num_workers=config.num_workers,
                                            shuffle=False,
-                                           pin_memory=True)
+                                           pin_memory=False)
     
     
     
@@ -131,7 +133,7 @@ if __name__ == '__main__':
                                        batch_size=config.batch_size,
                                        num_workers=config.num_workers,
                                        shuffle=False,
-                                       pin_memory=True)
+                                       pin_memory=False)
     
     
     print("Query Images Test:", len(query_dataset_test))

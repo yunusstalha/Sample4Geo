@@ -23,7 +23,7 @@ import wandb
 class Configuration:
     
     # Model
-    model: str = 'vit_base_patch16_clip_224.openai'  # nvidia/segformer-b3-finetuned-ade-512-512, convnext_base.fb_in22k_ft_in1k_384
+    model: str = 'openai/clip-vit-base-patch16'  # nvidia/segformer-b3-finetuned-ade-512-512, convnext_base.fb_in22k_ft_in1k_384, vit_base_patch16_clip_224.openai,vit_base_patch16_224.orig_in21k, openai/clip-vit-base-patch16
     
     # Override model image size
     img_size: int = 384
@@ -31,8 +31,8 @@ class Configuration:
     # Training 
     mixed_precision: bool = True
     seed = 1
-    epochs: int = 40
-    batch_size: int = 64        # keep in mind real_batch_size = 2 * batch_size
+    epochs: int = 60
+    batch_size: int = 32        # keep in mind real_batch_size = 2 * batch_size
     verbose: bool = True
     gpu_ids: tuple = (0,1,2)   # GPU ids for training
     
@@ -46,7 +46,7 @@ class Configuration:
     gps_dict_path: str = "/home/erzurumlu.1/yunus/research_drive/data/VIGOR/gps_dict_cross.pkl"   # gps_dict_cross.pkl | gps_dict_same.pkl
  
     # Eval
-    batch_size_eval: int = 64
+    batch_size_eval: int = 32
     eval_every_n_epoch: int = 10      # eval every n Epoch
     normalize_features: bool = True
 
@@ -59,7 +59,7 @@ class Configuration:
     label_smoothing: float = 0.1
     
     # Learning Rate
-    lr: float = 0.0001                  # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
+    lr: float = 5e-5                  # 1 * 10^-4 for ViT | 1 * 10^-1 for CNN
     scheduler: str = "cosine"          # "polynomial" | "cosine" | "constant" | None
     warmup_epochs: int = 1
     lr_end: float = 0.0001             #  only for "polynomial"
@@ -80,7 +80,7 @@ class Configuration:
     zero_shot: bool = False  
     
     # Checkpoint to start from
-    checkpoint_start = None 
+    checkpoint_start =  None  # None | path to checkpoint
   
     # set num_workers to 0 if on Windows
     num_workers: int = 0 if os.name == 'nt' else 4 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
 
     wandb.init(project='Sample4Geo', 
                config=config.__dict__,
-                notes="This run is for training Vigor model on cross area with GPS sampling only. Model is ConvNext with 384x384 sat 384x768 ground images. ")
+                notes="This run is for training Vigor model on cross area with GPS sampling only. Model is  single ViT. This test is for seeing full panorama image")
     if config.same_area:
         task = "same"
     else:
@@ -171,7 +171,7 @@ if __name__ == '__main__':
             
     # Model to device   
     model = model.to(config.device)
-
+    wandb.watch(model, log="all", log_freq=100)
     print("\nImage Size Sat:", image_size_sat)
     print("Image Size Ground:", img_size_ground)
     print("Mean: {}".format(mean))
@@ -205,7 +205,7 @@ if __name__ == '__main__':
                                   batch_size=config.batch_size,
                                   num_workers=config.num_workers,
                                   shuffle=not config.custom_sampling,
-                                  pin_memory=True)
+                                  pin_memory=False)
     
     
     # Eval
@@ -228,7 +228,7 @@ if __name__ == '__main__':
                                            batch_size=config.batch_size_eval,
                                            num_workers=config.num_workers,
                                            shuffle=False,
-                                           pin_memory=True)
+                                           pin_memory=False)
     
     
     
@@ -244,7 +244,7 @@ if __name__ == '__main__':
                                        batch_size=config.batch_size_eval,
                                        num_workers=config.num_workers,
                                        shuffle=False,
-                                       pin_memory=True)
+                                       pin_memory=False)
     
     
     print("Query Images Test:", len(query_dataset_test))
@@ -278,7 +278,7 @@ if __name__ == '__main__':
                                             batch_size=config.batch_size_eval,
                                             num_workers=config.num_workers,
                                             shuffle=False,
-                                            pin_memory=True)
+                                            pin_memory=False)
         
         # Reference Satellite Images Train for simsampling
         reference_dataset_train = VigorDatasetEval(data_folder=config.data_folder ,
@@ -292,7 +292,7 @@ if __name__ == '__main__':
                                                 batch_size=config.batch_size_eval,
                                                 num_workers=config.num_workers,
                                                 shuffle=False,
-                                                pin_memory=True)
+                                                pin_memory=False)
             
       
         print("\nQuery Images Train:", len(query_dataset_train))

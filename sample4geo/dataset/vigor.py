@@ -35,7 +35,8 @@ class VigorDatasetTrain(Dataset):
             self.cities = ['Chicago', 'NewYork', 'SanFrancisco', 'Seattle']
         else:
             self.cities = ['NewYork', 'Seattle'] 
-
+        # Initialize caption dicts 
+        
         # load sat list 
         sat_list = []
         for city in self.cities:
