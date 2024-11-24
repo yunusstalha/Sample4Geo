@@ -18,6 +18,7 @@ from sample4geo.evaluate.vigor import evaluate, calc_sim
 from sample4geo.loss import InfoNCE
 from sample4geo.model import TimmModel
 
+from transformers import CLIPTokenizer
 import wandb
 @dataclass
 class Configuration:
@@ -106,7 +107,7 @@ if __name__ == '__main__':
 
     wandb.init(project='Sample4Geo', 
                config=config.__dict__,
-                notes="This run is for training Vigor model on cross area with GPS sampling only. Model is  single ViT. This test is for seeing full panorama image")
+                notes="This run is for training Vigor model on cross area with GPS sampling only. Model is  single ViT.Cross modality trainming wtih language supervison")
     if config.same_area:
         task = "same"
     else:
@@ -139,6 +140,8 @@ if __name__ == '__main__':
     model = TimmModel(config.model,
                           pretrained=True,
                           img_size=config.img_size)
+    tokenizer = CLIPTokenizer.from_pretrained(config.model)
+
                           
     data_config = model.get_config()
     print(data_config)
@@ -418,7 +421,8 @@ if __name__ == '__main__':
                            optimizer=optimizer,
                            scheduler=scheduler,
                            scaler=scaler,
-                           wandb=wandb)
+                           wandb=wandb,
+                           tokenizer=tokenizer,)
         wandb.log({"epoch": epoch, "train_loss": train_loss, "learning_rate": optimizer.param_groups[0]['lr']})
 
         print("Epoch: {}, Train Loss = {:.3f}, Lr = {:.6f}".format(epoch,

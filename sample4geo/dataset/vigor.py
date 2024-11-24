@@ -35,8 +35,11 @@ class VigorDatasetTrain(Dataset):
             self.cities = ['Chicago', 'NewYork', 'SanFrancisco', 'Seattle']
         else:
             self.cities = ['NewYork', 'Seattle'] 
+
         # Initialize caption dicts 
-        
+        self.ground_captions = {}
+        self.sat_captions = {} 
+
         # load sat list 
         sat_list = []
         for city in self.cities:
@@ -44,6 +47,13 @@ class VigorDatasetTrain(Dataset):
             df_tmp = df_tmp.rename(columns={0: "sat"})
             df_tmp["path"] = df_tmp.apply(lambda x: f'{data_folder}/{city}/satellite/{x.sat}', axis=1)
             sat_list.append(df_tmp)
+
+            # Load satellite captions for the city
+            sat_caption_path = f'{self.data_folder}/{city}/satellite_captions.csv'
+            df_sat_captions = pd.read_csv(sat_caption_path)
+            sat_captions_dict = dict(zip(df_sat_captions['filename'], df_sat_captions['caption']))
+            self.sat_captions.update(sat_captions_dict)
+
         self.df_sat = pd.concat(sat_list, axis=0).reset_index(drop=True)
         
         # idx for complete train and test independent of mode = train or test
@@ -74,6 +84,13 @@ class VigorDatasetTrain(Dataset):
                 df_tmp[f'{sat_n}'] = df_tmp[f'{sat_n}'].map(sat2idx)
                 
             ground_list.append(df_tmp) 
+
+            # Load ground captions for the city
+            ground_caption_path = f'{self.data_folder}/{city}/panorama_captions.csv'
+            df_ground_captions = pd.read_csv(ground_caption_path)
+            ground_captions_dict = dict(zip(df_ground_captions['filename'], df_ground_captions['caption']))
+            self.ground_captions.update(ground_captions_dict)
+
         self.df_ground = pd.concat(ground_list, axis=0).reset_index(drop=True)
         
         # idx for split train or test dependent on mode = train or test
@@ -105,7 +122,12 @@ class VigorDatasetTrain(Dataset):
         # load reference -> satellite image
         reference_img = cv2.imread(self.idx2sat_path[idx_sat])
         reference_img = cv2.cvtColor(reference_img, cv2.COLOR_BGR2RGB)
+        
 
+        ground_filename = self.idx2ground[idx_ground]
+        sat_filename = self.idx2sat[idx_sat]
+        ground_caption = self.ground_captions.get(ground_filename, "")
+        sat_caption = self.sat_captions.get(sat_filename, "")
             
         # Flip simultaneously query and reference
         if np.random.random() < self.prob_flip:
@@ -135,7 +157,7 @@ class VigorDatasetTrain(Dataset):
             
         label = torch.tensor(idx_sat, dtype=torch.long)  
         
-        return query_img, reference_img, label
+        return query_img, reference_img, label,ground_caption, sat_caption
     
     def __len__(self):
         return len(self.samples)

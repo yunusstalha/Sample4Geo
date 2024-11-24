@@ -5,7 +5,7 @@ from .utils import AverageMeter
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
-def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None, wandb=None):
+def train(train_config, model, dataloader, loss_function, optimizer, scheduler=None, scaler=None, wandb=None, tokenizer=None):
 
     # set model train mode
     model.train()
@@ -26,21 +26,24 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
         bar = dataloader
     
     # for loop over one epoch
-    for query, reference, ids in bar:
+    for query, reference, ids, query_caption, reference_caption in bar:
         
         if scaler:
             with autocast():
-            
+                query_caption = tokenizer(query_caption, padding=True, truncation=True, return_tensors="pt")
+                reference_caption = tokenizer(reference_caption, padding=True, truncation=True, return_tensors="pt")
                 # data (batches) to device   
                 query = query.to(train_config.device)
                 reference = reference.to(train_config.device)
+                query_caption = {k: v.to(train_config.device) for k, v in query_caption.items()}
+                reference_caption = {k: v.to(train_config.device) for k, v in reference_caption.items()}
             
                 # Forward pass
-                features1, features2 = model(query, reference)
+                features1, features2, querry_text_features, reference_text_features = model(query, reference, query_caption, reference_caption)
                 if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
-                    loss = loss_function(features1, features2, model.module.logit_scale.exp())
+                    loss = loss_function(features1, features2, querry_text_features, reference_text_features, model.module.logit_scale.exp())
                 else:
-                    loss = loss_function(features1, features2, model.logit_scale.exp()) 
+                    loss = loss_function(features1, features2, querry_text_features, reference_text_features, model.logit_scale.exp()) 
                 losses.update(loss.item())
                 
                   
@@ -63,17 +66,18 @@ def train(train_config, model, dataloader, loss_function, optimizer, scheduler=N
                 scheduler.step()
    
         else:
-        
+            query_caption = tokenizer(query_caption, padding=True, truncation=True, return_tensors="pt")
+            reference_caption = tokenizer(reference_caption, padding=True, truncation=True, return_tensors="pt")
             # data (batches) to device   
             query = query.to(train_config.device)
             reference = reference.to(train_config.device)
-
+            
             # Forward pass
-            features1, features2 = model(query, reference)
+            features1, features2, querry_text_features, reference_text_features = model(query, reference, query_caption, reference_caption)
             if torch.cuda.device_count() > 1 and len(train_config.gpu_ids) > 1: 
-                loss = loss_function(features1, features2, model.module.logit_scale.exp())
+                loss = loss_function(features1, features2, querry_text_features, reference_text_features, model.module.logit_scale.exp())
             else:
-                loss = loss_function(features1, features2, model.logit_scale.exp()) 
+                loss = loss_function(features1, features2, querry_text_features, reference_text_features, model.logit_scale.exp()) 
             losses.update(loss.item())
 
             # Calculate gradient using backward pass

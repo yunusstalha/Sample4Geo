@@ -2,7 +2,7 @@ import torch
 import timm
 import numpy as np
 import torch.nn as nn
-from transformers import SegformerModel, SegformerConfig, CLIPVisionModel
+from transformers import SegformerModel, SegformerConfig, CLIPVisionModelWithProjection, CLIPTextModelWithProjection
 
 
 class TimmModel(nn.Module):
@@ -35,13 +35,17 @@ class TimmModel(nn.Module):
             # automatically change interpolate pos-encoding to img_size
             # self.model_sat = timm.create_model(model_name, pretrained=True, num_classes=0, img_size=img_size)
             # self.model_pan = timm.create_model(model_name, pretrained=True, num_classes=0, img_size=(img_size, 2 * img_size))
-            self.model = CLIPVisionModel.from_pretrained(model_name, hidden_act= 'gelu')
             # self.model = CLIPVisionModel.from_pretrained("/home/erzurumlu.1/yunus/research_drive/language_pretrain/checkpoint-1450")
+            self.model = CLIPVisionModelWithProjection.from_pretrained(model_name, hidden_act= 'gelu')
+            self.text_model = CLIPTextModelWithProjection.from_pretrained(model_name)
+            # Freeze the text model
+            for param in self.text_model.parameters():
+                param.requires_grad = False
 
         elif "convnext" in model_name:
             self.model_sat = timm.create_model(model_name, pretrained=pretrained, num_classes=0)
             self.model_pan = timm.create_model(model_name, pretrained=pretrained, num_classes=0)
-        
+        # I am using same logit scale for all models bt this needs to be fixed
         self.logit_scale = torch.nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         
         
@@ -83,7 +87,7 @@ class TimmModel(nn.Module):
         #     self.model.set_grad_checkpointing(enable)
 
         
-    def forward(self, img1, img2=None):
+    def forward(self, img1=None, img2=None,text1=None, text2=None):
         
         if 'segformer' in self.model_name:
             # Forward pass through SegFormer encoder
@@ -104,18 +108,6 @@ class TimmModel(nn.Module):
                 features = self.projection(features)    # Shape: [B, output_dim]
                 return features
         # elif "vit" in self.model_name:
-        #     # Forward pass through tim
-        #     # if img1 is not None and img2 is not None:
-        #     #     image_features1 = self.model_pan(img1)     
-        #     #     image_features2 = self.model_sat(img2)
-                
-        #     #     return image_features1, image_features2
-        #     # elif img1 is not None: 
-        #     #     image_features = self.model_pan(img1)
-        #     #     return image_features
-        #     # elif img2 is not None:
-        #     #     image_features = self.model_sat(img2)
-        #     #     return image_features
         #     if img1 is not None and img2 is not None:
         #         image_features1 = self.model(img1, interpolate_pos_encoding=True).pooler_output     
         #         image_features2 = self.model(img2,interpolate_pos_encoding=True).pooler_output
@@ -128,52 +120,41 @@ class TimmModel(nn.Module):
         #         image_features = self.model(img2, interpolate_pos_encoding=True).pooler_output     
         #         return image_features
         elif "vit" in self.model_name:
-            if img1 is not None:
-                # img1 is the panorama image of size (batch_size, 3, 384, 768)
-                batch_size, channels, height, width = img1.shape
-                square_size = height  # 384
+            image_features1, image_features2 = None, None
+            text_features1, text_features2 = None, None
 
-                # Extract four square images
-                start_positions = [0, 128, 256, 384]  # Starting x positions for each square image
-                square_images = [img1[:, :, :, start:start+square_size] for start in start_positions]
+            # Process img1 if provided
+            if img1 is not None and img2 is None:
+                outputs1 = self.model(img1, interpolate_pos_encoding=True)
+                image_features1 = outputs1.image_embeds  # Shape: [batch_size, hidden_dim]
+                return image_features1
 
-                # Stack square images into a batch
-                img1_squares = torch.cat(square_images, dim=0)  # (batch_size * 4, 3, 384, 384)
+            # Process img2 if provided
+            if img2 is not None and img1 is None:
+                outputs2 = self.model(img2,interpolate_pos_encoding=True)
+                image_features2 = outputs2.image_embeds  # Shape: [batch_size, hidden_dim]
+                return image_features2
 
-                # Process img1_squares through the model
-                image_features1 = self.model(img1_squares, interpolate_pos_encoding=True).pooler_output  # (batch_size * 4, hidden_dim)
+            # Only process texts when both images are provided
+            if img1 is not None and img2 is not None:
+                outputs1 = self.model(img1, interpolate_pos_encoding=True)
+                image_features1 = outputs1.image_embeds  # Shape: [batch_size, hidden_dim]
 
-                # Reshape back to (batch_size, 4, hidden_dim)
-                hidden_dim = image_features1.size(-1)
-                image_features1 = image_features1.view(batch_size, 4, hidden_dim)
+                # Process image 2
+                outputs2 = self.model(img2,interpolate_pos_encoding=True)
+                image_features2 = outputs2.image_embeds  # Shape: [batch_size, hidden_dim]
 
-                # # Assign headings to each square image
-                # headings = torch.tensor([90, 150, 210, 270], device=img1.device).unsqueeze(0).repeat(batch_size, 1)  # (batch_size, 4)
+                text_outputs1 = self.text_model(**text1)
+                text_features1 = text_outputs1.text_embeds  # Shape: [batch_size, hidden_dim]
+                # text_features1 = text_features1.detach()  # Ensure text encoder is frozen
 
-                # # Convert headings to radians
-                # headings_rad = torch.deg2rad(headings)
+                text_outputs2 = self.text_model(**text2)
+                text_features2 = text_outputs2.text_embeds  # Shape: [batch_size, hidden_dim]
+                # text_features2 = text_features2.detach()  # Ensure text encoder is frozen
 
-                # # Convert headings to sin and cos values
-                # sin_headings = torch.sin(headings_rad)
-                # cos_headings = torch.cos(headings_rad)
-                # heading_features = torch.stack((sin_headings, cos_headings), dim=-1)  # (batch_size, 4, 2)
+            # Return the features
+            return image_features1, image_features2, text_features1, text_features2
 
-                # # Concatenate heading features to image features
-                # image_features1 = torch.cat((image_features1, heading_features), dim=-1)  # (batch_size, 4, hidden_dim + 2)
-
-                # Combine embeddings using averaging
-                image_features1 = image_features1.mean(dim=1)  # (batch_size, hidden_dim)
-
-                if img2 is not None:
-                    # Process img2 as usual
-                    image_features2 = self.model(img2, interpolate_pos_encoding=True).pooler_output
-                    return image_features1, image_features2
-                else:
-                    return image_features1
-        elif img2 is not None:
-            # Process img2 as usual
-            image_features = self.model(img2, interpolate_pos_encoding=True).pooler_output
-            return image_features
 
         elif 'convnext' in self.model_name:
             if img1 is not None and img2 is not None:
